@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: my-postgres
+    environment:
+      POSTGRES_DB: myapp_db
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: my-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  celery_worker:
+    image: python:3.11-slim
+    container_name: my-celery-worker
+    working_dir: /app
+    environment:
+      - DATABASE_URL=postgresql://myuser:mypassword@postgres:5432/myapp_db
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - .:/app
+    command: >
+      sh -c "pip install -r requirements.txt &&
+             celery -A app.celery_app worker --loglevel=info"
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  flower:
+    image: mher/flower:1.2.0
+    container_name: my-flower
+    ports:
+      - "5555:5555"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - redis
+      - celery_worker
+    restart: unless-stopped
+    networks:
+      - app-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  app-network:
+    driver: bridge
